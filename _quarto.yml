@@ -1,0 +1,20 @@
+project:
+  title: "The Zone Wars"
+  type: website
+  output-dir: docs
+  
+format:
+  html:
+    theme: cosmo
+    code-links: repo
+    other-links:
+      - text: GitHub
+        icon: github
+        href: https://github.com/amoellers/
+      - text: LinkedIn
+        icon: linkedin
+        href: https://www.linkedin.com/in/austinmoellers/
+      - text: Quarto Pub
+        icon: book
+        href: https://austin.quarto.pub/
+

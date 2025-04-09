@@ -1,0 +1,349 @@
+---
+title: "The Zone Wars"
+author: 
+  name: "Austin Moellers"
+  email: "AustinMoellers@outlook.com"
+date: "2025/04/08"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    number-sections: false
+    smooth-scroll: true
+    code-copy: false
+knitr:
+  opts_chunk: 
+    warning: false
+    message: false
+    out-width: 100%
+execute: 
+  cache: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| include: false
+
+library(zoo)
+library(mgcv)
+library(broom)
+library(knitr)
+library(patchwork)
+library(rmarkdown)
+library(baseballr)
+library(tidyverse)
+```
+
+```{r}
+#| include: false
+
+sc_2024 <- read_rds("data/statcast_2024.rds")
+sc_ids <- sc_2024 |>
+  pull(batter) |>
+  unique()
+biographical <- mlb_people(sc_ids)
+```
+
+# The "Theoretical" Strike Zone
+
+According to the [Official Baseball Rules](https://mktg.mlbstatic.com/mlb/official-information/2025-official-baseball-rules.pdf), "The STRIKE ZONE is that area over home plate the upper limit of which is a horizontal line at the midpoint between the top of the shoulders and the top of the uniform pants, and the lower level is a line at the hollow beneath the kneecap. The Strike Zone shall be determined from the batter’s stance as the batter is prepared to swing at a pitched ball."
+
+Based on this definition, the strike zone changes batter to batter and even pitch to pitch. Take for example this at-bat from [Nolan Schanuel](https://www.baseball-reference.com/players/s/schanno01.shtml) who attempts a bunt on pitches one, three, and four which dramatically shrinks their strike zone. Even between pitches two and five there is some variance between the top and bottom of their zone according to Statcast.
+
+```{r}
+#| echo: false
+
+sc_2024 |>
+  filter(game_pk == 746085, at_bat_number == 63) |>
+  select(pitch_number, balls, strikes, pitch_name, batter_name, pitcher_name, description, sz_top, sz_bot) |>
+  kable()
+```
+
+The following videos, courtesy of MLB, show pitches two and three.
+
+::: {layout-ncol=2}
+{{< video https://sporty-clips.mlb.com/T1FkT1JfVjBZQUhRPT1fQWdJQVYxQU5VQUFBV3dkV0JRQUFCMVJXQUZrTUJ3VUFBMVZVVmdvRFZBRlFVMWRR.mp4 >}}
+
+{{< video https://sporty-clips.mlb.com/T1FkT1JfVjBZQUhRPT1fVndKWlhRRlNWRkVBRHdRRFZnQUFVd1lIQUFNR1ZsTUFCMU1BQ1FaUkJWVUJVd2RR.mp4 >}}
+:::
+
+During spring training of 2025, MLB decided to implement the Automated Ball-Strike System (ABS) that was first used in the independent Atlantic League in 2019. Although unconfirmed, it is speculated that we could see a version of ABS used in the MLB regular season as early as 2026. Differing from the strike zone outlined in the official rules, the ABS strike zone is fixed and based solely on the batters height.
+
+![ABS Strize Zone - Source: MLB.com](https://img.mlbstatic.com/mlb-images/image/upload/t_16x9/t_w1536/mlb/b4qmqymbxehalzri3ztp.jpg)
+
+The following table displays the median strike zone length based on Statcast data (`sc_length`) and the ABS strike zone length based on each batter's height (`abs_length`) for all batters from the 2024 season. For a majority of batters, the length of the ABS zone is shorter than that of Statcast. The biggest discrepancy belongs to [Heston Kjerstad](https://www.baseball-reference.com/register/player.fcgi?id=kjerst000hes) whose ABS strike zone is almost a half foot shorter than Statcast.
+
+```{r}
+#| echo: false
+
+sc_zones <- sc_2024 |>
+  group_by(batter, batter_name) |>
+  summarize(
+    sc_top = median(sz_top, na.rm = TRUE),
+    sc_bot = median(sz_bot, na.rm = TRUE)
+  ) |>
+  mutate(
+    sc_length = sc_top - sc_bot
+  )
+
+abs_zones <- biographical |>
+  select(id, height) |>
+  mutate(
+    feet = parse_number(str_sub(height, 1, 1)),
+    inches = parse_number(str_sub(height, 4, 5)),
+    height = ((feet * 12) + inches) / 12,
+    abs_top = height * 0.535,
+    abs_bot = height * 0.270,
+    abs_length = abs_top - abs_bot
+  )
+
+zones <- left_join(sc_zones, abs_zones, by = join_by(batter == id)) |>
+  ungroup() |>
+  mutate(difference = sc_length - abs_length) |>
+  select(batter, batter_name, height, sc_top, abs_top, sc_bot, abs_bot, sc_length, abs_length, difference)
+
+zones |>
+  select(batter_name, height, sc_length, abs_length, difference) |>
+  mutate(across(where(is.double), \(x) round(x, 3))) |>
+  arrange(batter_name) |>
+  DT::datatable(class = c("compact", "stripe"))
+```
+
+These discrepancies in strike zone length can be attributed to several factors, such as how much a batter crouches and the lengths of their legs and torso. Take [Bryce Harper](https://www.baseball-reference.com/players/h/harpebr03.shtml) for example, who bats in an abnormally crouched position which results in an ABS strike zone larger than that of Statcast.
+
+The following videos, courtesy of MLB, show a stark difference in batting position between Kjerstad and Harper. Note that both players are 6'2".
+
+::: {layout-ncol=2}
+{{< video https://sporty-clips.mlb.com/TndlRzdfWGw0TUFRPT1fRHdOU0FGWlhCVk1BQUZKV0FnQUFCMU1EQUZsVVVRSUFBd2NHQkZZQUJRc0hCQVZR.mp4 >}}
+
+{{< video https://sporty-clips.mlb.com/R1pWV25fWGw0TUFRPT1fQlFnSFVGWUJCQUlBREZjR0J3QUFWUWRmQUZrSFVBTUFWZ0FNVWdSUkFsWUJCd0VI.mp4 >}}
+:::
+
+# The "Real" Strike Zone
+
+Comparing ABS with Statcast is a fun exercise, but the most important strike zone is the one being called by the home plate umpire. How does the ABS strike zone compare to that of the strike zone being called by the man in blue.
+
+```{r}
+#| include: false
+
+qual_batters <- fg_batter_leaders(startseason = 2024, endseason = 2024, qual = "y") |>
+  pull(xMLBAMID)
+
+fg_2024 <- fg_batter_leaders(startseason = 2024, endseason = 2024, qual = "0")
+
+batters_2024 <- fg_2024 |>
+  filter(position != "P") |>
+  pull(xMLBAMID)
+
+pitchers_2024 <- fg_2024 |>
+  filter(position == "P") |>
+  pull(xMLBAMID)
+
+sc_2024_adj <- sc_2024 |>
+  filter(pitcher %in% pitchers_2024) |>
+  mutate(
+    strike = if_else(zone %in% 1:9, 1, 0),
+    sz_length = sz_top - sz_bot,
+    sz_ratio = sz_length / 1.81,
+    adj_plate_z = 2.505 + ((plate_z - ((sz_length / 2) + sz_bot)) / sz_ratio)
+  )
+
+fit_gam <- function(player) {
+  data <- sc_2024 |>
+    filter(
+      description %in% c("ball", "called_strike", "blocked_ball"),
+      batter_name == player
+    ) |>
+    mutate(strike = if_else(description == "called_strike", 1, 0))
+  fit <- mgcv::gam(
+    strike ~ s(plate_x, plate_z),
+    family = binomial,
+    data = data
+  )
+  grid <- expand_grid(
+    plate_x = seq(-3, 3, by = 0.04),
+    plate_z = seq(0, 6, by = 0.04)
+  )
+  hats <- fit |>
+    predict(newdata = grid, type = "response")
+  grid <- grid |>
+    mutate(prob = hats)
+  grid
+}
+```
+
+Taking a look at the umpire called strike zones for eight popular players during the 2024 season, It appears that umpires don't adjust their called zones (blue) nearly as much as they should according to Statcast (black). The glaring example is [Aaron Judge](https://www.baseball-reference.com/players/j/judgeaa01.shtml) who is getting away with a ton of missed calls at the top of the zone. The top of the ABS zones (red) are generally much shorter than Statcast, which should provide lots of challenge opportunities at for batters the top of the zone when ABS is implemented.
+
+```{r}
+#| echo: false
+
+key_players <- c(
+  "Ohtani, Shohei", "Judge, Aaron", "Witt Jr., Bobby", "Soto, Juan",
+  "Guerrero Jr., Vladimir", "Lindor, Francisco", "Alvarez, Yordan", "Harper, Bryce"
+)
+
+map(key_players, \(x) fit_gam(x)) |>
+  set_names(key_players) |>
+  list_rbind(names_to = "batter_name") |>
+  left_join(zones, by = join_by(batter_name)) |>
+  ggplot(aes(x = plate_x, y = plate_z, z = prob)) +
+  geom_rect(
+    aes(xmin = -0.83, xmax = 0.83, ymin = sc_bot, ymax = sc_top),
+    colour = "black", alpha = 0, linewidth = 1
+  ) +
+  geom_rect(
+    aes(xmin = -0.83, xmax = 0.83, ymin = abs_bot, ymax = abs_top),
+    colour = "red", alpha = 0, linewidth = 1, linetype = 2
+  ) +
+  geom_contour(binwidth = 0.5, linewidth = 1) +
+  lims(x = c(-1.2, 1.2), y = c(1, 4.5)) +
+  coord_fixed() +
+  facet_wrap(~batter_name, nrow = 2) +
+  theme(
+    axis.line = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank()
+  )
+```
+
+The ability to manipulate the Statcast zone is likely why MLB has elected to use a static strike zone for ABS. If ABS used the Statcast zone, we may have ended up seeing more players adopt a similar approach to a player like [Juan Soto](https://www.baseball-reference.com/players/s/sotoju01.shtml) in an attempt to game the system.
+
+# Area Comparison
+
+The following plot compares the average strike zone according to Statcast (black), ABS (red), and the umpires (blue) using all pitch data from the 2024 season. The umpire called zone is actually remarkably accurate relative to Statcast, but there is a clear discrepancy in how ABS is defining the top of the zone.
+
+```{r}
+#| eval: false
+#| include: false
+
+fit_all <- mgcv::gam(
+  strike ~ s(plate_x, adj_plate_z),
+  family = binomial,
+  data = sc_2024_adj
+)
+```
+
+```{r}
+#| include: false
+
+fit_all <- read_rds("data/sz_model.rds")
+
+grid <- expand_grid(
+  plate_x = seq(-3, 3, by = 0.04),
+  adj_plate_z = seq(0, 6, by = 0.04)
+)
+
+hats <- fit_all |>
+  predict(newdata = grid, type = "response")
+
+grid <- grid |>
+  mutate(prob = hats)
+
+contour <- contourLines(matrix(grid$prob, 151, 151, byrow = TRUE), level = 0.5)
+
+ump_area <- with(contour[[1]], splancs::areapl(cbind(x, y))) * 36
+```
+
+```{r}
+#| include: false
+
+corner_adj <- ((0.12^2) * 4) - (pi * 0.12^2)
+sz_width <- 17 / 12 + 0.24
+
+sc_top_med <- median(sc_2024$sz_top, na.rm = TRUE) + 0.12
+sc_bot_med <- median(sc_2024$sz_bot, na.rm = TRUE) - 0.12
+
+sc_area <- ((sc_top_med - sc_bot_med) * sz_width) - corner_adj
+
+abs_top_med <- median(zones$abs_top) + 0.12
+abs_bot_med <- median(zones$abs_bot) - 0.12
+
+abs_area <- ((abs_top_med - abs_bot_med) * sz_width) - corner_adj
+```
+
+```{r}
+#| echo: false
+
+ggplot(grid, aes(x = plate_x, y = adj_plate_z, z = prob)) +
+  geom_rect(
+    xmin = -8.5 / 12, xmax = 8.5 / 12, ymin = 1.6, ymax = 3.41,
+    colour = "black", alpha = 0, linewidth = 1
+  ) +
+  geom_rect(
+    xmin = -8.5 / 12, xmax = 8.5 / 12, ymin = 1.62, ymax = 3.21,
+    colour = "red", alpha = 0, linewidth = 1, linetype = 2
+  ) +
+  geom_contour(binwidth = 0.5, linewidth = 1) +
+  lims(x = c(-1, 1), y = c(1, 4)) +
+  coord_fixed() +
+  theme(
+    axis.line = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank()
+  )
+```
+
+Since the Statcast data provides a single coordinate for each pitch, the blue contours represent the area in which the center of the baseball can land and be called a strike. This differs from the boxes which just require any part of the ball to pass through any part of the zone. Putting all three zones on the same scale, we can compare their areas. The Statcast zone has an area of `{r} format(sc_area, digits = 4)` sq. ft., the ABS zone has an area of `{r} format(abs_area, digits = 4)` sq. ft., and the umpire called zone has an area of `{r} format(ump_area, digits = 4)` sq. ft. This deviation may be why we saw such a low success rate (52.2%) on challenges during spring training, since the ABS zone is not representative of the strike zone that players are used to.
+
+```{r}
+#| include: false
+
+sz_area <- function(player) {
+  data <- sc_2024 |>
+    filter(
+      batter_name == player,
+      description %in% c("ball", "called_strike", "blocked_ball")
+    ) |>
+    mutate(strike = if_else(description == "called_strike", 1, 0))
+  fit <- mgcv::gam(
+    strike ~ s(plate_x, plate_z),
+    family = binomial,
+    data = data
+  )
+  grid <- expand_grid(
+    plate_x = seq(-3, 3, by = 0.04),
+    plate_z = seq(0, 6, by = 0.04)
+  )
+  hats <- fit |>
+    predict(newdata = grid, type = "response")
+  grid <- grid |>
+    mutate(prob = hats)
+  lines <- contourLines(matrix(grid$prob, 151, 151, byrow = TRUE), level = 0.5)
+  ump_area <- with(lines[[1]], splancs::areapl(cbind(x, y))) * 36
+  tibble(batter_name = player, ump_area)
+}
+
+ump_areas <- sc_2024 |>
+  filter(description %in% c("ball", "called_strike", "blocked_ball")) |>
+  count(batter_name) |>
+  filter(n >= 750) |>
+  left_join(sc_2024, by = join_by(batter_name)) |>
+  group_split(batter_name) |>
+  map(\(x) sz_area(player = first(x$batter_name))) |>
+  bind_rows()
+```
+
+Finally, here is a table comparing all three strike zone areas for batters who saw at least 750 called pitches during the 2024 season.
+
+```{r}
+#| echo: false
+
+ump_areas |>
+  left_join(zones, by = join_by(batter_name)) |>
+  mutate(
+    sc_area = ((sc_length + 0.24) * sz_width) - corner_adj,
+    abs_area = ((abs_length + 0.24) * sz_width) - corner_adj,
+    across(where(is.double), \(x) round(x, 3))
+  ) |>
+  select(batter_name, height, sc_area, abs_area, ump_area) |>
+  DT::datatable(class = c("compact", "stripe"))
+```
+
+Although I am in favour of bringing ABS to MLB, I am not the biggest fan of the current implementation. I believe that the top of the ABS strike zone should be raised to at least 56% of the batter's height to better reflect what umpires are calling.
